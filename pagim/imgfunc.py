@@ -30,9 +30,15 @@ def image_op(opname):
 # Color conversion
 
 @image_op("Grayscale")
-def fliplr(img):
+def grayscale(img):
     img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     return img, "img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)"
+
+
+@image_op("Grayscale->RGB")
+def gray2rgb(img):
+    img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    return img, "img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)"
 
 
 @image_op("RGB->YCrCb get Y")
@@ -76,6 +82,17 @@ def yuv_v(img):
     ]
     return rgb, code
 
+
+@image_op("Brighten by HSV")
+def brighten_hsv(img):
+    h, s, v = cv2.split(cv2.cvtColor(img, cv2.COLOR_RGB2HSV))
+    v = np.clip(v+30, 0, 255)
+    img = cv2.cvtColor(cv2.merge([h,s,v]), cv2.COLOR_HSV2RGB)
+    code = [
+        "h, s, v = cv2.split(cv2.cvtColor(img, cv2.COLOR_RGB2HSV))",
+        "img = cv2.cvtColor(cv2.merge([h,s,np.clip(v+30, 0, 255)]), cv2.COLOR_HSV2RGB)"
+    ]
+    return img, code
 
 
 # Rotation and flips
@@ -183,7 +200,7 @@ def closing(img):
 # Distort
 
 @image_op("Gaussian blur (radius 11)")
-def camera_blur(img):
+def gaussian_blur(img):
     img = cv2.GaussianBlur(img, (11,11), 0)
     return img, "img = cv2.GaussianBlur(img, (11,11), 0)"
 
@@ -250,14 +267,82 @@ def sobel_edge(img):
     # blur to remove small noise first
     blur = cv2.GaussianBlur(img, (5,5), 0)
     # Find horizontal and vertical gradients using Sobel kernel
-    grad_x = cv.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)
-    grad_y = cv.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
-    grads = cv2.addWeighted(grad_x, 0.5, grad_y, 0.5)  # weighted average
+    grad_x = cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
+    grads = cv2.addWeighted(grad_x, 0.5, grad_y, 0.5, 0.0)  # simple weighted average
     img = cv2.convertScaleAbs(grads)   # transform back to uint8
     code = [
         "blur = cv2.GaussianBlur(gray, (5,5), 0)",
-        "grad_x = cv.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)",
-        "grad_y = cv.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)",
-        "img = cv2.convertScaleAbs(cv2.addWeighted(grad_x, 0.5, grad_y, 0.5))"
+        "grad_x = cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)",
+        "grad_y = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)",
+        "img = cv2.convertScaleAbs(cv2.addWeighted(grad_x, 0.5, grad_y, 0.5, 0.0))"
     ]
     return img, code
+
+
+# Sharpening
+
+@image_op("Unsharp mask")
+def usm(img):
+    radius = 2.0
+    weight = -1.0  # USM needs negative weight
+    blur = cv2.GaussianBlur(img, (0, 0), radius)
+    img = cv2.addWeighted(img, 1-weight, blur, weight, 0).astype(np.uint8)
+    code = "img = cv2.addWeighted(img, 2.0, cv2.GaussianBlur(img, (0,0), 2.0), -1.0, 0).astype(np.uint8)"
+    return img, code
+
+
+@image_op("Kernel sharpening")
+def kernel_sharpening(img):
+    kern = np.array([[ 0,-1, 0],
+                     [-1, 5,-1],
+                     [ 0,-1, 0]])
+    img = cv2.filter2D(img, -1, kern)
+    return img, "img = cv2.filter2D(img, -1, np.array([[0,-1,0],[-1,5,-1],[0,-1,0]]))"
+
+
+@image_op("Deskew page using Canny edge")
+def deskew_canny(img):
+    """Complete workflow from RGB image to deskewed"""
+    # blur and thresholding
+    blur = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), (3,3), 2)
+    blur = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    blur = cv2.fastNlMeansDenoising(blur, 11, 31, 9)
+    # canny edge detection
+    edged = cv2.Canny(blur, 50, 150, apertureSize=7)
+    # find max contour
+    contours, _hierarchy = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def _simplify_contour(c):
+        hull = cv2.convexHull(c)
+        return cv2.approxPolyDP(hull, 0.03*cv2.arcLength(hull, True), True)
+    contours = [_simplify_contour(c) for c in contours]
+    max_contour = max(contours, key=cv2.contourArea)
+    h, w = img.shape[:2]
+    if len(max_contour) != 4 and cv2.isContourConvex(max_contour):
+        return img  # non-quardrilateral contour, refuse to do anything
+    if cv2.contourArea(max_contour) < h*w*0.25:
+        return img  # contour too small, refuse to do anything
+    # order the four-point contour
+    pts = max_contour.reshape(4,2).astype(np.float32)
+    clockwise_pts = np.zeros_like(pts)
+    tlbr = np.sum(pts, axis=1)
+    trbl = np.diff(pts, axis=1)
+    clockwise_pts[0] = pts[np.argmin(tlbr)]  # top-left = smallest coord sum
+    clockwise_pts[2] = pts[np.argmax(tlbr)]  # bottom-right = largest coord sum
+    clockwise_pts[1] = pts[np.argmin(trbl)]  # top-right = most negative coord diff
+    clockwise_pts[3] = pts[np.argmax(trbl)]  # bottom-left = most positive coord diff
+    # measure the lengths of the quadrilateral for resize target
+    len_top = np.linalg.norm(clockwise_pts[0] - clockwise_pts[1])
+    len_bottom = np.linalg.norm(clockwise_pts[2] - clockwise_pts[3])
+    len_left = np.linalg.norm(clockwise_pts[0] - clockwise_pts[3])
+    len_right = np.linalg.norm(clockwise_pts[1] - clockwise_pts[2])
+    target_w, target_h = int(max(len_top, len_bottom)-1), int(max(len_left, len_right)-1)
+    # four-point perspective transform
+    dst = np.array([[0, 0], [target_w, 0], [target_w, target_h], [0, target_h]], dtype=np.float32)
+    print(clockwise_pts, dst)
+    M = cv2.getPerspectiveTransform(clockwise_pts, dst)
+    img = cv2.warpPerspective(img, M, (target_w, target_h))
+    return img, "img = deskew_canny(img)"
+
+
+

@@ -32,7 +32,6 @@ state: dict = dict(filename=None, orig=None, prev=None, this=None, history=None)
 
 def listdir() -> Iterable[str]:
     """Read the image dir and yield out all image files"""
-    print("Reading from", IMAGEDIR)
     for filename in walkdir_with_extension(IMAGEDIR, IMAGEEXT, 0):
         yield os.path.basename(filename)
 
@@ -123,7 +122,6 @@ def create_gradio(projectname="Test out image operations"):
         gr.HTML(r'<div><h1 style="position:relative;"><img src="static/logo.png" style="float:right;" />%s</h1></div>' % projectname)
         with gr.Row():
             imagefiles = list(listdir())
-            print(imagefiles)
             filenames = gr.Dropdown(choices=imagefiles, label="Images from disk")
             ops = gr.Dropdown(choices=list(opdict.keys()), label="Operations")
             with gr.Column():
