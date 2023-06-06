@@ -1,0 +1,2 @@
+"""Document page image processor
+"""
