@@ -319,9 +319,9 @@ def deskew_canny(img):
     max_contour = max(contours, key=cv2.contourArea)
     h, w = img.shape[:2]
     if len(max_contour) != 4 and cv2.isContourConvex(max_contour):
-        return img  # non-quardrilateral contour, refuse to do anything
+        return img, ""  # non-quardrilateral contour, refuse to do anything
     if cv2.contourArea(max_contour) < h*w*0.25:
-        return img  # contour too small, refuse to do anything
+        return img, ""  # contour too small, refuse to do anything
     # order the four-point contour
     pts = max_contour.reshape(4,2).astype(np.float32)
     clockwise_pts = np.zeros_like(pts)
