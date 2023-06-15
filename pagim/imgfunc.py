@@ -254,6 +254,23 @@ def add_saltpepper(img):
     return img
 
 
+@image_op("Hough line transform from Canny edge")
+def hough_edge(img):
+    # blur to remove small noise first, then Canny for edges
+    blur = cv2.GaussianBlur(img, (5,5), 0)
+    canny = cv2.Canny(blur, 75, 200)
+    # Probabilistic Hough line, with resolution at rho=1 theta=1 deg, threshold
+    # for 50 votes, min line length 50px and max line gap 10px
+    lines = cv2.HoughLinesP(canny, 1, np.pi/180, 50, None, 50, 10)
+    if lines is None:
+        return img, ""
+    for line in lines:
+        x0, y0, x1, y1 = line[0]
+        print(line, np.arctan2(y1-y0, x1-x0)*180/np.pi)
+        cv2.line(img, (x0,y0), (x1,y1), (255,0,0), 3, cv2.LINE_AA)
+    return img, "img = hough_edge(img)"
+
+
 @image_op("Canny edge on grayscale image")
 def canny_edge(img):
     # blur to remove small noise first
@@ -280,16 +297,42 @@ def sobel_edge(img):
     return img, code
 
 
-# Sharpening
+# Improvement
+
+@image_op("Gamma adjust")
+def gamma_adj(img):
+    gamma = 1.1
+    inv_gamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+    # apply gamma correction using the lookup table
+    code = 'img = cv2.LUT(img, np.uint8([((i/255.0) ** (1/1.1)) * 255 for i in range(256)]))'
+    img = cv2.LUT(img, table)
+    return img, code
+
 
 @image_op("Unsharp mask")
 def usm(img):
-    radius = 2.0
+    sigma = 2.0    # blur kernel stdev to calculate the kernel
     weight = -1.0  # USM needs negative weight
-    blur = cv2.GaussianBlur(img, (0, 0), radius)
+    blur = cv2.GaussianBlur(img, (0,0), sigma)
     img = cv2.addWeighted(img, 1-weight, blur, weight, 0).astype(np.uint8)
     code = "img = cv2.addWeighted(img, 2.0, cv2.GaussianBlur(img, (0,0), 2.0), -1.0, 0).astype(np.uint8)"
     return img, code
+
+
+@image_op("Shadow removal")
+def shadow_removal(img):
+    channels = cv2.split(img)
+    out_channels = []
+    for c in channels:
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7,7))
+        bg = cv2.medianBlur(cv2.dilate(c, kernel), 21)
+        diff = 255 - cv2.absdiff(c, bg)
+        # optional
+        c = cv2.normalize(diff, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
+        out_channels.append(c)
+    img = cv2.merge(out_channels)
+    return img, "img = shadow_removal(img)"
 
 
 @image_op("Kernel sharpening")
@@ -305,9 +348,13 @@ def kernel_sharpening(img):
 def deskew_canny(img):
     """Complete workflow from RGB image to deskewed"""
     # blur and thresholding
-    blur = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), (3,3), 2)
+    blur = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), (3,3), 0)
     blur = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
     blur = cv2.fastNlMeansDenoising(blur, 11, 31, 9)
+    # optional: assume page is light compared to the background, perform Otsu
+    # threshold to binarize at high threshold 250 to make most background dark
+    # so Canny edge detection can be more focused on the page
+    #   _, thresh = cv2.threshold(blur, 250, 255, cv2.THRESH_OTSU)
     # canny edge detection
     edged = cv2.Canny(blur, 50, 150, apertureSize=7)
     # find max contour
@@ -339,10 +386,38 @@ def deskew_canny(img):
     target_w, target_h = int(max(len_top, len_bottom)-1), int(max(len_left, len_right)-1)
     # four-point perspective transform
     dst = np.array([[0, 0], [target_w, 0], [target_w, target_h], [0, target_h]], dtype=np.float32)
-    print(clockwise_pts, dst)
     M = cv2.getPerspectiveTransform(clockwise_pts, dst)
     img = cv2.warpPerspective(img, M, (target_w, target_h))
     return img, "img = deskew_canny(img)"
 
 
+@image_op("Deskew page using Hough line")
+def deskew_hough(img):
+    """Complete workflor from RGB image to deskewed"""
+    # Blur and read Canny edge
+    blur = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), (3,3), 0)
+    edged = cv2.Canny(blur, 50, 150, apertureSize=7)
+    # Read Hough lines
 
+
+@image_op("Derotate page using Otsu thresholding")
+def derotate(img):
+    """Complete workflow from RGB image to orthogonalized"""
+    # Gaussian blur, threshold, and dilate the image
+    blur = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), (3,3), 0)
+    _, blur = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INF + cv2.THRESH_OTSU)  # using Otsu thresholding
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 5))
+    blur = cv2.dilate(blur, kernel, iterations=5)
+    # Find the contour from the thresholded image
+    contours, _hierarchy = cv2.findContours(blur, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    max_contour = max(contours, key=cv2.contourArea)
+    # Find the min bounding rectangle, and from it, the angle
+    rect = cv2.minAreaRect(max_contour)
+    # to get the 4 corners: corners = cv2.boxPoints(rect)
+    # rotate
+    angle = rect[-1]
+    angle = (90+angle) if angle < -45 else (90-angle) if angle > 45 else angle
+    h, w = img.shape[:2]
+    M = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
+    img = cv2.warpPerspective(img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return img, "img = derotate(img)"

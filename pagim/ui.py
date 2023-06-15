@@ -104,7 +104,7 @@ def gr_action(operation):
     else:
         state["prev"] = state["this"]
     function = opdict[operation]
-    newimg, command = function(state["prev"])
+    newimg, command = function(state["prev"].copy())
     if isinstance(command, str):
         state["history"].append(command)
     else:
