@@ -1,7 +1,22 @@
 """Image processing function"""
 
+import os
+import functools
+
 import cv2
 import numpy as np
+import super_image
+import torch
+
+from .dewrap import dewrap
+
+
+if torch.cuda.is_available():
+    device = torch.device("cuda:0")
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 
 
 # Register image processing functions
@@ -18,6 +33,13 @@ def image_op(opname):
         opdict[opname] = fn
         return fn
     return _deco
+
+
+@functools.lru_cache
+def get_edsr_base():
+    """Singleton to load EDSR-Base model from Huggingface"""
+    return super_image.EdsrModel.from_pretrained('eugenesiow/edsr-base', scale=4).to(device)
+
 
 
 #
@@ -421,3 +443,26 @@ def derotate(img):
     M = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
     img = cv2.warpPerspective(img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
     return img, "img = derotate(img)"
+
+
+@image_op("Downsample 2x")
+def downsample(img):
+    return cv2.pyrDown(img), "img = cv2.pyrDown(img)"
+
+
+@image_op("EDSR-Base super-res")
+def edsr_base(img):
+    # make RGB image with pixel range 0-1 of float32 and in NCHW tensor
+    inputs = torch.as_tensor([(np.float32(img) / 255.0).transpose([2,0,1])])
+    # run the model over PyTorch
+    model = get_edsr_base()
+    preds = model(inputs.to(device))
+    # transform PyTorch tensor back to numpy in HWC format
+    pred = np.clip(1-preds.data.cpu().numpy()[0].transpose([1,2,0]), 0, 1) * 255.0
+    img = np.int8(pred)
+    return img, "img = EDSRBase(img)"
+
+
+@image_op("Cubic dewrap")
+def cubic_dewrap(img):
+    return dewrap(img), "img = cubic_dewrap(img)"

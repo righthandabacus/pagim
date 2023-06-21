@@ -10,13 +10,14 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from .logger import add_handlers
+from .logger import add_handlers, reset_handlers
 from .utils import exception_hook
 from .filesys import project_root, walkdir_with_extension
 from .imgfunc import opdict
 
 
 exception_hook("debug")
+reset_handlers()
 _ = add_handlers([
     {"name": "console", "level": "DEBUG"}
 ])  # initialize root logger
