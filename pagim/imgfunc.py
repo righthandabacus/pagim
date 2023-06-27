@@ -9,7 +9,12 @@ import super_image
 import torch
 
 from .dewrap import dewrap
-
+from PIL import ImageDraw, ImageFont
+import PIL.Image
+from wand.image import Image
+from wand.drawing import Drawing
+from wand.color import Color
+import random
 
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
@@ -275,6 +280,63 @@ def add_saltpepper(img):
     ]
     return img
 
+@image_op("Ink-stain")
+def ink_stain(img):
+    h, w, _ = img.shape
+
+    # Generate random ink stains
+    num_stains = np.random.randint(5, 10)  # Adjust the number of stains as needed
+    for _ in range(num_stains):
+        x1, y1 = np.random.randint(0, w), np.random.randint(0, h)
+        x2, y2 = np.random.randint(x1 + 10, w), np.random.randint(y1 + 10, h)
+        color = np.random.randint(0, 256, 3).tolist()
+        img=cv2.rectangle(img, (x1, y1), (x2, y2), color, -1)
+        cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    return img, "num_stains = np.random.randint(5, 10)  # Adjust the number of stains as needed\nfor _ in range(num_stains):\nx1, y1 = np.random.randint(0, w), np.random.randint(0, h)\nx2, y2 = np.random.randint(x1 + 10, w), np.random.randint(y1 + 10, h)\ncolor = np.random.randint(0, 256, 3).tolist()\nimg=cv2.rectangle(img, (x1, y1), (x2, y2), color, -1)\ncv2.cvtColor(img, cv2.COLOR_BGR2RGB)"
+
+
+@image_op("Scribble")
+def scribble(img):
+    img_height, img_width, _ = img.shape
+    max_x = img_width - 1
+    max_y = img_height - 1
+
+    cv2.putText(img, "fascinating", (int(max_x * 0.5), int(max_y * 0.2)), cv2.FONT_HERSHEY_SIMPLEX, 10, (0, 0, 0), 20, cv2.LINE_AA)
+    cv2.putText(img, "__", (int(max_x * 0.3), int(max_y * 0.5)), cv2.FONT_HERSHEY_SIMPLEX, 12, (0, 0, 0), 15, cv2.LINE_AA)
+    cv2.putText(img, "_ _", (int(max_x * 0.15), int(max_y * 0.7)), cv2.FONT_HERSHEY_SIMPLEX, 12, (0, 0, 0), 15, cv2.LINE_AA)
+    cv2.putText(img, "NB!", (int(max_x * 0.8), int(max_y * 0.3)), cv2.FONT_HERSHEY_SIMPLEX, 10, (0, 0, 0), 20, cv2.LINE_AA)
+
+    return img,"img_height, img_width, _ = img.shape\nmax_x = img_width - 1\nmax_y = img_height - 1\ncv2.putText(img, fascinating, (int(max_x * 0.5), int(max_y * 0.2)), cv2.FONT_HERSHEY_SIMPLEX, 10, (0, 0, 0), 20, cv2.LINE_AA)\ncv2.putText(img, __, (int(max_x * 0.3), int(max_y * 0.5)), cv2.FONT_HERSHEY_SIMPLEX, 12, (0, 0, 0), 15, cv2.LINE_AA)\ncv2.putText(img, _ _, (int(max_x * 0.15), int(max_y * 0.7)), cv2.FONT_HERSHEY_SIMPLEX, 12, (0, 0, 0), 15, cv2.LINE_AA)\ncv2.putText(img, NB!, (int(max_x * 0.8), int(max_y * 0.3)), cv2.FONT_HERSHEY_SIMPLEX, 10, (0, 0, 0), 20, cv2.LINE_AA)"              
+
+@image_op("Watermark")
+def watermark(img):
+    transp_grey = (80, 80, 80, 0.4)
+    img=cv2.putText(img, "Watermark", (300, 400), cv2.FONT_HERSHEY_SIMPLEX, 5, transp_grey, thickness=2)
+    return img, "transp_grey = (80, 80, 80, 0.4)\nimg=cv2.putText(img, \"Watermark\", (300, 400), cv2.FONT_HERSHEY_SIMPLEX, 5, transp_grey, thickness=2)"
+
+@image_op("Salt and Pepper")
+def snp(img):
+    with Image.from_array(img.astype(np.uint8)) as image:
+        image.noise("impulse", attenuate=0.5)
+        return np.array(image),"def snp(img),\nwith Image.from_array(img.astype(np.uint8)) as image:\nimage.noise(\"impulse\", attenuate=0.5)"
+
+@image_op("Weak ink")
+def weaken(img):
+    with Image.from_array(img.astype(np.uint8)) as image:
+        image.oil_paint()
+        return np.array(image),"with Image.from_array(img.astype(np.uint8)) as image:\nimage.oil_paint()"
+
+@image_op("Shadow")
+def add_shadow(img):
+    # Convert the image to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (0, 0), 5)
+    adjusted = cv2.addWeighted(blur, 1.2, -30, 0, 0)
+    adjusted_bgr = cv2.cvtColor(adjusted, cv2.COLOR_GRAY2BGR)
+    shadowed_img = cv2.addWeighted(img, 0.6, adjusted_bgr, 0.4, 0)
+
+    return shadowed_img,"gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)\nblur = cv2.GaussianBlur(gray, (0, 0), 5)\nadjusted = cv2.addWeighted(blur, 1.2, -30, 0, 0)\nadjusted_bgr = cv2.cvtColor(adjusted, cv2.COLOR_GRAY2BGR)\nshadowed_img = cv2.addWeighted(img, 0.6, adjusted_bgr, 0.4, 0)"
+    
 
 @image_op("Hough line transform from Canny edge")
 def hough_edge(img):
